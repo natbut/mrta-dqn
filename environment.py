@@ -30,6 +30,11 @@ class Environment:
         self.env_con_task_to_task_transition_times = task_to_task_transition_times
         self.env_con_starting_task_id = starting_task_id
 
+        # rewards for various things ig lol
+        self.env_con_task_satisfied_reward = 1
+        self.env_con_task_completed_reward = 10
+        self.env_con_all_tasks_completed_reward = 100
+
         # declare the environment variables based on the constants
         self.env_var_agents_time_to_complete = [
             0 for agent in range(self.env_con_num_agents)
@@ -76,7 +81,7 @@ class Environment:
         """
         based on the actions specified, move all agents and update environment variables
         """
-        reward = np.zeros(self.env_con_num_agents + 1, np.int8)  # initialise reward
+        reward = 0
         # make sure the actions are specified for each agent
         if len(agents_vs_actions) != self.env_con_num_agents:
             raise IndexError("Number of actions doesn't equal number of agents.")
@@ -97,7 +102,6 @@ class Environment:
                 self.dec_var_agents_current_action[i][WORKING] == 1
                 and self.env_var_agents_time_to_complete[i] > 0
             ):
-                reward[i] = 1
                 continue
 
             # Update the previous task of the agent
@@ -152,6 +156,7 @@ class Environment:
                 and self.env_var_tasks_time_left[task_id] > 0
             ):
                 self.env_var_tasks_time_left[task_id] -= 1
+                reward += self.task_satisfied_reward
                 for agent_i in range(len(self.dec_var_agents_at_tasks[:, task_id])):
                     if (
                         arr_working_agents[agent_i] == True
@@ -163,7 +168,7 @@ class Environment:
             if self.env_var_tasks_completed[task_id] == 0:
                 if self.env_var_tasks_time_left[task_id] <= 0:
                     self.env_var_tasks_completed[task_id] = 1
-                    reward[-1] = 10
+                    reward += self.task_completed_reward
 
         # 3. for each agent that is not working, incremement the cum idle time
         for agent_i in range(self.env_con_num_agents):
