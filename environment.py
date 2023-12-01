@@ -103,7 +103,7 @@ class Environment:
 
         # flow related variables
         self.env_flow_incr = 0
-        if flow_vector: self.env_flow_vector = np.random.uniform(0.1, 0.1, [2,],)
+        if flow_vector: self.env_flow_vector = np.random.uniform(0.1, 0.5, [2,])
 
         # enable printing
         self.verbose = verbose
