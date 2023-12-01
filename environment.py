@@ -1,6 +1,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import networkx as nx
+from copy import deepcopy
 
 APPROACHING = 0
 WORKING = 1
@@ -13,22 +14,28 @@ class Environment:
         num_agents,
         tasks_vs_reqd_agents,
         tasks_vs_reqd_time,
-        task_to_task_transition_times=None,
+        task_to_task_transition_times,
         starting_task_id=0,
+        flow_vector=None,
+        flow_update_freq=2,
+        verbose=False,
     ) -> None:
         """
         @param list tasks_vs_reqd_agents: how many agents are required to complete each task
         @param list tasks_vs_reqd_time: how many consecutive timesteps agents need to be on a task to complete it
         @param matrix task_to_task_transition_times: transition time between each task pair
         @param int starting_task_id: which task id agents start from (default = 0)
+        @param (2,) ndarray flow_vector: initial flow vector to modify transition table by
+        @param int flow_update_freq: frequency by which flow is updated
+        @param bool verbose: whether to print env variables
         """
 
-        # set the environment constants
+        # set some environment constants
         self.env_con_num_agents = num_agents
         self.env_con_tasks_vs_reqd_agents = tasks_vs_reqd_agents
         self.env_con_tasks_vs_reqd_time = tasks_vs_reqd_time
-        self.env_con_task_to_task_transition_times = task_to_task_transition_times
         self.env_con_starting_task_id = starting_task_id
+        self.env_con_flow_freq = flow_update_freq
 
         # rewards for various things ig lol
         self.env_con_task_satisfied_reward = 1
@@ -36,6 +43,33 @@ class Environment:
         self.env_con_all_tasks_completed_reward = 100
         self.env_con_timestep_penalty = -0.1
 
+        # graph representation for nodes with spatial relationships
+        self.num_nodes = len(task_to_task_transition_times)
+        self.G = nx.DiGraph()
+        attr_list = [
+            {"x": np.random.randint(0, 100), "y": np.random.randint(0, 100)}
+            for i in range(self.num_nodes)
+        ]
+        nodes_w_attr = list(zip(range(self.num_nodes), attr_list))
+        self.G.add_nodes_from(nodes_w_attr)
+
+        # setup edges with transition and vectors
+        for i in range(self.num_nodes):
+            for j in range(self.num_nodes):
+                if i == j:
+                    continue
+                curr_vector = [
+                    self.G.nodes[i]["x"] - self.G.nodes[j]["x"],
+                    self.G.nodes[i]["y"] - self.G.nodes[j]["y"],
+                ]
+                self.G.add_edge(
+                    i,
+                    j,
+                    weight=task_to_task_transition_times[i][j],
+                    edge_vector=curr_vector,
+                )
+
+        self.env_con_task_to_task_transition_times = nx.to_numpy_array(self.G)
         # declare the environment variables based on the constants
         self.env_var_agents_time_to_complete = [
             0 for agent in range(self.env_con_num_agents)
@@ -56,16 +90,23 @@ class Environment:
 
         # initialise the decision variables as numpy matrices
         self.dec_var_agents_at_tasks = np.zeros(
-            (num_agents, len(self.env_con_tasks_vs_reqd_agents)), np.bool8
+            (num_agents, len(self.env_con_tasks_vs_reqd_agents)), np.bool_
         )  # maps which task each agent is associated with
         self.dec_var_agents_current_action = np.zeros(
-            (num_agents, 3), np.bool8
+            (num_agents, 3), np.bool_
         )  # maps which action each agent is currently performing
 
         self.dec_var_agents_at_tasks[
             :, self.env_con_starting_task_id
         ] = 1  # initialise all agents to starting task id
         self.dec_var_agents_current_action[:, 2] = 1  # initalise all agents to idle
+
+        # flow related variables
+        self.env_flow_incr = 0
+        self.env_flow_vector = flow_vector
+
+        # enable printing
+        self.verbose = verbose
 
     def display_env(self):
         print("dec_var_agents_at_tasks: \n", self.dec_var_agents_at_tasks)
@@ -78,18 +119,47 @@ class Environment:
         print("env_var_tasks_time_left: ", self.env_var_tasks_time_left)
         print("-----------------------------")
 
+    def update_transition_table(self, flow_vector):
+        new_weight = deepcopy(nx.to_numpy_array(self.G))
+        edge_attrs = {}
+        for i in range(self.num_nodes):
+            for j in range(self.num_nodes):
+                if i == j:
+                    new_weight[i][j] = 0.0
+                    continue
+                # project flow vector in edge vector direction
+                new_weight[i][j] += np.dot(
+                    flow_vector, self.G.edges[i, j]["edge_vector"]
+                )
+                edge_attrs[(i, j)] = {
+                    "weight": new_weight[i][j],
+                    "edge_vector": self.G.edges[i, j]["edge_vector"],
+                }
+        nx.set_edge_attributes(self.G, edge_attrs)
+        self.env_con_task_to_task_transition_times = new_weight
+
     def step(self, agents_vs_actions):
         """
         based on the actions specified, move all agents and update environment variables
         """
         reward = self.env_con_timestep_penalty
+
+        # update flow
+        if self.env_flow_vector is not None:
+            if (
+                self.env_flow_incr != 0
+                and self.env_flow_incr % self.env_con_flow_freq == 0
+            ):
+                self.update_transition_table(self.env_flow_vector)
+                self.env_flow_vector *= np.random.uniform(0.7, 1.2, [2,])
+            self.env_flow_incr += 1
+
         # make sure the actions are specified for each agent
         if len(agents_vs_actions) != self.env_con_num_agents:
             raise IndexError("Number of actions doesn't equal number of agents.")
 
         # loop through each specified action to allot the action in the decision variables to each agent
         for agent_action, i in zip(agents_vs_actions, range(len(agents_vs_actions))):
-            print(i, agent_action)
 
             # if agent is in 'approach' with >0 time left, it cannot change actions
             if (
@@ -185,34 +255,10 @@ class TaskVisualization:
     def __init__(self, env):
         self.transition_times = env.env_con_task_to_task_transition_times
         self.num_nodes = len(self.transition_times)
-        self.G = nx.DiGraph()
-        attr_list = [
-            {"x": np.random.randint(0, 100), "y": np.random.randint(0, 100)}
-            for i in range(self.num_nodes)
-        ]
-        nodes_w_attr = list(zip(range(self.num_nodes), attr_list))
-        self.G.add_nodes_from(nodes_w_attr)
-
-        # initialize w euclidean distances if no transitions available
-        if self.transition_times is None:
-            for i in range(self.num_nodes):
-                for j in range(self.num_nodes):
-                    if i != j:
-                        self.G.add_edge(
-                            i,
-                            j,
-                            weight=np.hypot(
-                                self.G.nodes[i]["x"] - self.G.nodes[j]["x"],
-                                self.G.nodes[i]["y"] - self.G.nodes[j]["y"],
-                            ),
-                        )
-        else:
-            for i in range(self.num_nodes):
-                for j in range(self.num_nodes):
-                    if i != j:
-                        self.G.add_edge(i, j, weight=self.transition_times[i][j])
+        self.G = env.G
+        self.verbose = env.verbose
         self.pos = nx.spring_layout(self.G)
-        print("self pos", self.pos)
+        # print("self pos", self.pos)
 
     def _display_agents(
         self, agent_vs_task_mat, dot_colour="black", action=APPROACHING
@@ -283,9 +329,10 @@ class TaskVisualization:
             ]
         ).T
 
-        print("working_agents_vs_tasks: \n", working_agents_vs_tasks)
-        print("approaching_agents_vs_tasks: \n", approaching_agents_vs_tasks)
-        print("idle agents vs task: \n", idle_agents_vs_tasks)
+        if self.verbose:
+            print("working_agents_vs_tasks: \n", working_agents_vs_tasks)
+            print("approaching_agents_vs_tasks: \n", approaching_agents_vs_tasks)
+            print("idle agents vs task: \n", idle_agents_vs_tasks)
 
         # Clear the previous plot
         plt.clf()
@@ -318,11 +365,19 @@ class TaskVisualization:
 if __name__ == "__main__":
     transition_matrix = [[0, 3, 2, 4], [3, 0, 5, 6], [2, 5, 0, 1], [4, 6, 1, 0]]
 
-    env = Environment(5, [0, 3, 2, 4], [0, 5, 4, 1], transition_matrix, 0)
+    env = Environment(
+        5,
+        [0, 3, 2, 4],
+        [0, 5, 4, 1],
+        transition_matrix,
+        0,
+        np.random.uniform(0.1, 0.1, [2,],),
+    )
 
     task_visualization = TaskVisualization(env)
-    print(env.dec_var_agents_at_tasks)
-    print(env.dec_var_agents_current_action, "\n")
+    if env.verbose:
+        print(env.dec_var_agents_at_tasks)
+        print(env.dec_var_agents_current_action, "\n")
 
     # List of parameters for the step function
     actions_list = [
@@ -356,6 +411,7 @@ if __name__ == "__main__":
     # Loop through the list and apply the step function, display_env, and update functions
     for actions in actions_list:
         reward = env.step(actions)
-        print("Reward: ", reward)
-        env.display_env()
+        if env.verbose:
+            print("Reward: ", reward)
+            env.display_env()
         task_visualization.update(env)
