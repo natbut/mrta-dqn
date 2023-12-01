@@ -16,7 +16,7 @@ class Environment:
         tasks_vs_reqd_time,
         task_to_task_transition_times,
         starting_task_id=0,
-        flow_vector=None,
+        flow_vector=False,
         flow_update_freq=2,
         verbose=False,
     ) -> None:
@@ -103,7 +103,7 @@ class Environment:
 
         # flow related variables
         self.env_flow_incr = 0
-        self.env_flow_vector = flow_vector
+        if flow_vector: self.env_flow_vector = np.random.uniform(0.1, 0.1, [2,],)
 
         # enable printing
         self.verbose = verbose
@@ -371,7 +371,7 @@ if __name__ == "__main__":
         [0, 5, 4, 1],
         transition_matrix,
         0,
-        np.random.uniform(0.1, 0.1, [2,],),
+        flow_vector=True
     )
 
     task_visualization = TaskVisualization(env)
