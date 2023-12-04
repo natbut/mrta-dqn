@@ -38,10 +38,10 @@ class Environment:
         self.env_con_flow_freq = flow_update_freq
 
         # rewards for various things ig lol
-        self.env_con_task_satisfied_reward = 1
-        self.env_con_task_completed_reward = 10
-        self.env_con_all_tasks_completed_reward = 100
-        self.env_con_timestep_penalty = -0.1
+        self.env_con_task_satisfied_reward = 3
+        self.env_con_task_completed_reward = 0 #10
+        self.env_con_all_tasks_completed_reward = 0 #100
+        self.env_con_timestep_penalty = -1
 
         # graph representation for nodes with spatial relationships
         self.num_nodes = len(task_to_task_transition_times)
@@ -103,7 +103,10 @@ class Environment:
 
         # flow related variables
         self.env_flow_incr = 0
-        if flow_vector: self.env_flow_vector = np.random.uniform(0.1, 0.5, [2,])
+        if flow_vector:
+            self.env_flow_vector = np.random.uniform(-0.1, 0.1, [2,])
+        else:
+            self.env_flow_vector = None
 
         # enable printing
         self.verbose = verbose
@@ -151,7 +154,7 @@ class Environment:
                 and self.env_flow_incr % self.env_con_flow_freq == 0
             ):
                 self.update_transition_table(self.env_flow_vector)
-                self.env_flow_vector *= np.random.uniform(0.7, 1.2, [2,])
+                self.env_flow_vector *= np.random.uniform(0.95, 1.05, [2,])
             self.env_flow_incr += 1
 
         # make sure the actions are specified for each agent
@@ -242,6 +245,13 @@ class Environment:
                 if self.env_var_tasks_time_left[task_id] <= 0:
                     self.env_var_tasks_completed[task_id] = 1
                     reward += self.env_con_task_completed_reward
+
+        # check whether tasks are complete; reward if so
+        done = True
+        for task_status in self.env_var_tasks_completed:
+            if task_status != 1: done = False
+        if done: reward += self.env_con_all_tasks_completed_reward
+
 
         # 3. for each agent that is not working, incremement the cum idle time
         for agent_i in range(self.env_con_num_agents):
