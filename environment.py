@@ -130,9 +130,13 @@ class Environment:
                     new_weight[i][j] = 0.0
                     continue
                 # project flow vector in edge vector direction
-                new_weight[i][j] += np.dot(
+                new_tt = new_weight[i][j] + np.dot(
                     flow_vector, self.G.edges[i, j]["edge_vector"]
                 )
+                if new_tt < 1.0:
+                    new_weight[i][j] = 1.0
+                else:
+                    new_weight[i][j] + new_tt
                 edge_attrs[(i, j)] = {
                     "weight": new_weight[i][j],
                     "edge_vector": self.G.edges[i, j]["edge_vector"],
@@ -293,7 +297,7 @@ class TaskVisualization:
                         t_steps = env.env_con_task_to_task_transition_times[task_id][
                             env.env_var_agents_prev_task[agent_id]
                         ]
-                        print(f"div: {x_line} {t_steps} {y_line}")
+                        # print(f"div: {x_line} {t_steps} {y_line}")
                         x_delta, y_delta = x_line / t_steps, y_line / t_steps
                         t_steps_left = env.env_var_agents_time_to_reach[agent_id]
                         x_pos, y_pos = prev_task_x_pos + x_delta * (
@@ -466,9 +470,9 @@ if __name__ == "__main__":
     # Loop through the list and apply the step function, display_env, and update functions
     for i in range(100):
         actions = greedy_policy(env)
-        print(actions)
         reward = env.step(actions)
         if env.verbose:
+            print("Actions", actions)
             print("Reward: ", reward)
             env.display_env()
         task_visualization.update(env)
