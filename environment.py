@@ -261,7 +261,7 @@ class Environment:
             if (self.dec_var_agents_current_action[:, WORKING])[agent_i] == False:
                 self.env_var_agents_cum_idle_time[agent_i] += 1
 
-        return reward
+        return done, reward
 
 
 class TaskVisualization:
@@ -470,9 +470,11 @@ if __name__ == "__main__":
     # Loop through the list and apply the step function, display_env, and update functions
     for i in range(100):
         actions = greedy_policy(env)
-        reward = env.step(actions)
+        done, reward = env.step(actions)
         if env.verbose:
             print("Actions", actions)
             print("Reward: ", reward)
             env.display_env()
+        if done:
+            break
         task_visualization.update(env)
