@@ -103,7 +103,7 @@ class Environment:
         # flow related variables
         self.env_flow_incr = 0
         if flow_vector:
-            self.env_flow_vector = np.random.uniform(-0.1, 0.1, [2,])
+            self.env_flow_vector = np.random.uniform(-2.0, 2.0, [2,])
         else:
             self.env_flow_vector = None
 
@@ -189,6 +189,9 @@ class Environment:
                 self.env_var_agents_time_to_complete[i] = self.env_var_tasks_time_left[
                     agent_action[0]
                 ]
+                curr_task_id = np.argmax(self.dec_var_agents_at_tasks[i])
+                if np.sum(self.dec_var_agents_at_tasks[:,curr_task_id]) < self.env_con_tasks_vs_reqd_agents[curr_task_id]:
+                    agent_action[1] = IDLE
                 # if the task the agent is on is already complete, change action to idle
                 if self.env_var_tasks_completed[agent_action[0]] == True:
                     agent_action[1] = IDLE
@@ -381,14 +384,13 @@ def greedy_policy(env: Environment):
     unfullfilled_tasks = []
     for agent_i in range(env.env_con_num_agents):
         curr_task_id = np.argmax(env.dec_var_agents_at_tasks[agent_i])
-        # set approaching_agents that have reached a valid task to working
+        # set approaching_agents that have reached a valid task to IDLE or WORKING
         if env.dec_var_agents_current_action[:, APPROACHING][agent_i] == True and env.env_var_agents_time_to_reach[agent_i] <= 0 and env.env_var_tasks_time_left[curr_task_id] > 0:
-                # print(f"set approaching_agents that have reached a valid task to working")
-                action_list.append([curr_task_id, WORKING])
+            # print(f"set approaching_agents that have reached a valid task to working")
+            action_list.append([curr_task_id, WORKING])
         else:
             # continue existing actions
             action_list.append([curr_task_id, np.argmax(env.dec_var_agents_current_action[agent_i])])
-            
         # get idle agents
         if env.dec_var_agents_current_action[:, IDLE][agent_i] == True:
             # get task ids for all tasks that are not fullfilled
@@ -397,23 +399,23 @@ def greedy_policy(env: Environment):
                 # if task requirements are not being met
                 arr_working_agents = (
                 env.dec_var_agents_at_tasks[:, task_id]
-                & env.dec_var_agents_current_action[:, WORKING])
+                & env.dec_var_agents_current_action[:, IDLE])
                 if (
                     np.sum(arr_working_agents) < env.env_con_tasks_vs_reqd_agents[task_id]
                 ):
-                    unfullfilled_tasks_pa[(agent_i, task_id)] = env.env_con_task_to_task_transition_times[np.argmax(env.dec_var_agents_at_tasks[agent_i]), task_id]
+                    unfullfilled_tasks_pa[(agent_i, task_id)] = [env.env_con_tasks_vs_reqd_agents[task_id], env.env_con_task_to_task_transition_times[np.argmax(env.dec_var_agents_at_tasks[agent_i]), task_id]]
             unfullfilled_tasks.append(unfullfilled_tasks_pa)
     
     requirement_matrix = deepcopy(env.env_con_tasks_vs_reqd_agents)
     for agent_dicts in unfullfilled_tasks:
-        agent_task, transition_times = zip(*sorted(zip(agent_dicts.keys(), agent_dicts.values()), key=lambda x: x[1]))
+        agent_task, req_tt = zip(*sorted(zip(agent_dicts.keys(), agent_dicts.values()), key=lambda x: x[1][0], reverse=True))
         agent_id = agent_task[0][0]
-        curr_task_id = np.argmax(env.dec_var_agents_at_tasks[agent_id])
+        curr_task_id = np.argmax(env.dec_var_agents_at_tasks[agent_i])
         if env.env_var_agents_time_to_reach[agent_id] <= 0 and env.env_var_tasks_time_left[curr_task_id] > 0:
                 action_list[agent_id] = [curr_task_id, WORKING]
         else:
             best_task_id = agent_task[0][1]
-            for i in range(len(transition_times)):
+            for i in range(len(req_tt)):
                 best_task_id = agent_task[i][1]
                 if env.env_var_tasks_completed[best_task_id] == False and requirement_matrix[best_task_id] > 0:
                     requirement_matrix[best_task_id] -= 1
@@ -422,16 +424,19 @@ def greedy_policy(env: Environment):
     return action_list
 
 if __name__ == "__main__":
-    transition_matrix = [[0, 3, 2, 4], [3, 0, 5, 6], [2, 5, 0, 1], [4, 6, 1, 0]]
-
-    env = Environment(
-        5,
-        [0, 3, 2, 4],
-        [0, 5, 4, 1],
-        transition_matrix,
-        0,
-        flow_vector=True
-    )
+    num_agents = 5
+    task_v_agents = [0, 3, 2, 4, 2, 1, 3, 3, 4]
+    task_v_time   = [0, 5, 4, 1, 3, 4, 6, 4, 2]
+    trans_time   = [[0, 3, 2, 4, 3, 5, 7, 4, 6],
+                    [3, 0, 5, 6, 4, 3, 1, 7, 8],
+                    [2, 5, 0, 1, 3, 4, 2, 5, 3],
+                    [4, 6, 1, 0, 1, 6, 4, 3, 5],
+                    [2, 4, 3, 1, 0, 4, 1, 2, 4],
+                    [1, 3, 4, 6, 4, 0, 3, 5, 2],
+                    [3, 1, 2, 4, 1, 3, 0, 4, 1],
+                    [3, 7, 5, 3, 2, 5, 4, 0, 6],
+                    [4, 8, 3, 5, 4, 2, 1, 6, 0]]
+    env = Environment(num_agents, task_v_agents, task_v_time, trans_time, 0, flow_vector=True, verbose=True)
 
     task_visualization = TaskVisualization(env)
     if env.verbose:
@@ -468,13 +473,14 @@ if __name__ == "__main__":
     ]
 
     # Loop through the list and apply the step function, display_env, and update functions
-    for i in range(100):
+    for i in range(1000):
         actions = greedy_policy(env)
         done, reward = env.step(actions)
         if env.verbose:
             print("Actions", actions)
             print("Reward: ", reward)
-            env.display_env()
+            print("Iter", i)
+            # env.display_env()
         if done:
             break
-        task_visualization.update(env)
+        # task_visualization.update(env)
